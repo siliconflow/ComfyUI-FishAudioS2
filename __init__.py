@@ -23,14 +23,28 @@ from typing import Any, Dict
 # Bundle fish-speech source — add it to sys.path so `import fish_speech` and
 # `import tools` resolve from our bundled copy, not from pip (which can't
 # install it reliably into embedded Python).
+#
+# NOTE: another plugin in the same image (ComfyUI-MixLab) ships a directory
+# named `fish_speech` under its own nodes/ tree. ComfyUI appends every
+# plugin's nodes dir to sys.path, and if that plugin imports `fish_speech`
+# first, Python caches sys.modules["fish_speech"] pointing at the foreign,
+# incomplete package. Later `from fish_speech.utils.file import
+# AUDIO_EXTENSIONS` here then fails with ImportError even though our bundled
+# copy has it. Path order alone cannot fix a poisoned sys.modules cache, so
+# evict any foreign fish_speech modules before anything in this plugin uses
+# the name.
 # ---------------------------------------------------------------------------
 _HERE = Path(__file__).parent.resolve()
 _FISH_SRC = _HERE / "fish_speech_src"
-# Add fish_speech_src to path
 if _FISH_SRC.is_dir():
     _fish_src_str = str(_FISH_SRC)
     if _fish_src_str not in sys.path:
         sys.path.insert(0, _fish_src_str)
+    # Evict foreign fish_speech modules cached by other plugins so our
+    # bundled copy (first on sys.path) wins on the next import.
+    for _k in [k for k in list(sys.modules)
+               if k == "fish_speech" or k.startswith("fish_speech.")]:
+        del sys.modules[_k]
 
 logger = logging.getLogger("FishAudioS2")
 logger.propagate = False
