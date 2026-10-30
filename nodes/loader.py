@@ -26,6 +26,39 @@ from pathlib import Path
 import numpy as np
 import torch
 
+import sys as _sys
+import types as _types
+from pathlib import Path as _Path
+
+_PLUGIN_ROOT = _Path(__file__).resolve().parent.parent
+_FISH_SRC_LOCAL = _PLUGIN_ROOT / "fish_speech_src"
+
+
+def _rebind_bundled_fish_speech() -> None:
+    """Force sys.modules["fish_speech"] to point at OUR bundled copy.
+
+    A foreign plugin in the same image (ComfyUI-MixLab) ships a
+    directory named fish_speech under its own nodes/ tree. Depending on
+    plugin load order it may claim the top-level name in sys.modules,
+    so a one-time eviction at plugin-load time can be undone later.
+    Fish_speech is bundled here as a namespace package (no __init__.py),
+    therefore rebinding = evict + install a namespace module whose
+    __path__ points only at our bundled tree. Called right before every
+    engine load so the binding is deterministic regardless of which
+    plugin was imported last.
+    """
+    for _k in [k for k in list(_sys.modules)
+               if k == "fish_speech" or k.startswith("fish_speech.")]:
+        del _sys.modules[_k]
+    _pkg = _FISH_SRC_LOCAL / "fish_speech"
+    if _pkg.is_dir():
+        _ns = _types.ModuleType("fish_speech")
+        _ns.__path__ = [str(_pkg)]
+        _sys.modules["fish_speech"] = _ns
+        _root = str(_FISH_SRC_LOCAL)
+        if _root not in _sys.path:
+            _sys.path.insert(0, _root)
+
 logger = logging.getLogger("FishAudioS2")
 
 # Sub-folder name inside ComfyUI/models/
@@ -317,6 +350,7 @@ def load_engine(
     attention: str,
     compile_model: bool,
 ):
+    _rebind_bundled_fish_speech()
     """
     Load the Fish Speech TTSInferenceEngine and apply the requested attention
     implementation.
